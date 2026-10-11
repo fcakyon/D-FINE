@@ -34,6 +34,23 @@ same `--name`, then score once with `--val-only` after all shards finish.
 `export_deim.py` writes the ONNX model and PyTorch FP32 reference outputs for the TensorRT parity check. Its docstring
 lists the arguments and ONNX packages.
 
+## COCO eval
+
+`coco_eval.py` scores a released COCO detector on COCO val2017 and COCO-SAMA (labels below). Its docstring lists the
+outputs. Our scores used faster-coco-eval 1.7.0 from a separate dir D
+(`uv pip install --target D faster-coco-eval==1.7.0`).
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=D .venv/bin/python ul37/coco_eval.py CONFIG WEIGHTS --images coco/images/val2017 \
+  --name NAME --output OUT --ann coco=coco/annotations/instances_val2017.json sama-coco=sama-coco/instances_val2017.json
+```
+
+| Size    | CONFIG                                                        | WEIGHTS                      |
+| ------- | ------------------------------------------------------------- | ---------------------------- |
+| N       | `configs/dfine/dfine_hgnetv2_n_coco.yml`                      | `dfine_n_coco.pth`           |
+| S, M, X | `configs/dfine/objects365/dfine_hgnetv2_{s,m,x}_obj2coco.yml` | `dfine_{s,m,x}_obj2coco.pth` |
+| L       | `configs/dfine/objects365/dfine_hgnetv2_l_obj2coco.yml`       | `dfine_l_obj2coco_e25.pth`   |
+
 ## COCO-SAMA labels
 
 COCO-SAMA re-annotates COCO val2017 images. Build its `instances_val2017.json` from Sama's release:
