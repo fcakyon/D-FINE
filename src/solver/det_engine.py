@@ -7,6 +7,7 @@ Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 """
 
 import math
+import os
 import sys
 from typing import Dict, Iterable, List
 
@@ -51,6 +52,7 @@ def train_one_epoch(
     ema: ModelEMA = kwargs.get("ema", None)
     scaler: GradScaler = kwargs.get("scaler", None)
     lr_warmup_scheduler: Warmup = kwargs.get("lr_warmup_scheduler", None)
+    accum = int(os.environ.get("GRAD_ACCUM_STEPS", 1))  # micro-batches per optimizer step
     losses = []
 
     output_dir = kwargs.get("output_dir", None)
@@ -60,6 +62,7 @@ def train_one_epoch(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
         global_step = epoch * len(data_loader) + i
+        step = (i + 1) % accum == 0 or i + 1 == len(data_loader)
         metas = dict(epoch=epoch, step=i, global_step=global_step, epoch_step=len(data_loader))
 
         if global_step < num_visualization_sample_batch and output_dir is not None and dist_utils.is_main_process():
@@ -88,34 +91,36 @@ def train_one_epoch(
                 loss_dict = criterion(outputs, targets, **metas)
 
             loss = sum(loss_dict.values())
-            scaler.scale(loss).backward()
+            scaler.scale(loss / accum).backward()
 
-            if max_norm > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            if step:
+                if max_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
 
         else:
             outputs = model(samples, targets=targets)
             loss_dict = criterion(outputs, targets, **metas)
 
             loss: torch.Tensor = sum(loss_dict.values())
-            optimizer.zero_grad()
-            loss.backward()
+            (loss / accum).backward()
 
-            if max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            if step:
+                if max_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
-            optimizer.step()
+                optimizer.step()
+                optimizer.zero_grad()
 
         # ema
-        if ema is not None:
+        if step and ema is not None:
             ema.update(model)
 
-        if lr_warmup_scheduler is not None:
+        if step and lr_warmup_scheduler is not None:
             lr_warmup_scheduler.step()
 
         loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
